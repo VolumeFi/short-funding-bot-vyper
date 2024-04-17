@@ -88,6 +88,8 @@ interface ERC20:
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10**18
 GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
+ORDER_VAULT: constant(address) = 0x31eF83a530Fde1B38EE9A18093A333D8Bbbc40D5
+USDC: constant(address) = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 blueprint: public(address)
 compass: public(address)
 refund_wallet: public(address)
@@ -97,12 +99,20 @@ service_fee: public(uint256)
 paloma: public(bytes32)
 
 @external
-def deposit(token: address, amount0: uint256, amount1: uint256, params: CreateOrderParams):
-    assert ERC20(token).transferFrom(msg.sender, self, amount0, default_return_value=True), "Failed transferFrom"
-    assert ERC20(token).approve(GMX_ROUTER, amount0, default_return_value=True), "Failed approve"
-    Router(GMX_ROUTER).sendWnt(self, amount0)
-    Router(GMX_ROUTER).sendTokens(token, self, amount1)
+@payable
+def deposit(amount0: uint256, params: CreateOrderParams):
+    assert ERC20(USDC).transferFrom(msg.sender, self, amount0, default_return_value=True), "Failed transferFrom"
+    assert ERC20(USDC).approve(GMX_ROUTER, amount0, default_return_value=True), "Failed approve"
+    Router(GMX_ROUTER).sendWnt(ORDER_VAULT, msg.value, value=msg.value)
+    Router(GMX_ROUTER).sendTokens(USDC, ORDER_VAULT, amount0)
     Router(GMX_ROUTER).createOrder(params)
+
+@external
+@payable
+def withdraw(amount0: uint256, params: CreateOrderParams):
+    Router(GMX_ROUTER).sendWnt(ORDER_VAULT, msg.value, value=msg.value)
+    Router(GMX_ROUTER).createOrder(params)
+    assert ERC20(USDC).transfer(msg.sender, amount0, default_return_value=True), "Failed transfer"
 
 @internal
 def _paloma_check():
