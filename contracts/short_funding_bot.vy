@@ -48,40 +48,13 @@ struct CreateOrderParams:
     shouldUnwrapNativeToken: bool
     referralCode: bytes32
 
-event UpdateBlueprint:
-    old_blueprint: address
-    new_blueprint: address
-
-event UpdateCompass:
-    old_compass: address
-    new_compass: address
-
-event UpdateRefundWallet:
-    old_refund_wallet: address
-    new_refund_wallet: address
-
-event SetPaloma:
-    paloma: bytes32
-
-event UpdateGasFee:
-    old_gas_fee: uint256
-    new_gas_fee: uint256
-
-event UpdateServiceFeeCollector:
-    old_service_fee_collector: address
-    new_service_fee_collector: address
-
-event UpdateServiceFee:
-    old_service_fee: uint256
-    new_service_fee: uint256
-
 interface Router:
     def sendWnt(receiver: address, amount: uint256): payable
     def sendTokens(token: address, receiver: address, amount: uint256): payable
     def createOrder(params: CreateOrderParams) -> bytes32: nonpayable
 
 interface ERC20:
-    def approve(_spender: address, _value: uint256) -> bool: nonpayable
+    def balanceOf(_owner: address) -> uint256: view
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
@@ -90,82 +63,85 @@ DENOMINATOR: constant(uint256) = 10**18
 GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
 ORDER_VAULT: constant(address) = 0x31eF83a530Fde1B38EE9A18093A333D8Bbbc40D5
 USDC: constant(address) = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
-blueprint: public(address)
-compass: public(address)
-refund_wallet: public(address)
-gas_fee: public(uint256)
-service_fee_collector: public(address)
-service_fee: public(uint256)
-paloma: public(bytes32)
+WETH: constant(address) = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
+GMX_MARKET: constant(address) = 0x6853EA96FF216fAb11D2d930CE3C508556A4bdc4
+FACTORY: public(immutable(address))
+OWNER: public(immutable(address))
+
+@external
+def __init__(owner: address):
+    OWNER = owner
+    FACTORY = msg.sender
 
 @external
 @payable
-def deposit(amount0: uint256, params: CreateOrderParams):
-    assert ERC20(USDC).transferFrom(msg.sender, self, amount0, default_return_value=True), "Failed transferFrom"
-    assert ERC20(USDC).approve(GMX_ROUTER, amount0, default_return_value=True), "Failed approve"
-    Router(GMX_ROUTER).sendWnt(ORDER_VAULT, msg.value, value=msg.value)
-    Router(GMX_ROUTER).sendTokens(USDC, ORDER_VAULT, amount0)
-    Router(GMX_ROUTER).createOrder(params)
+def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    assert ERC20(USDC).transferFrom(msg.sender, GMX_ROUTER, amount0, default_return_value=True), "Failed transferFrom"
+    Router(GMX_ROUTER).createOrder(order_params)
+    swap_params: CreateOrderParams = CreateOrderParams({
+        addresses: CreateOrderParamsAddresses({
+            receiver: self,
+            callbackContract: empty(address),
+            uiFeeReceiver: empty(address),
+            market: empty(address),
+            initialCollateralToken: USDC,
+            swapPath: [GMX_MARKET]
+        }),
+        numbers: CreateOrderParamsNumbers({
+            sizeDeltaUsd: 0,
+            initialCollateralDeltaAmount: 0,
+            triggerPrice: 0,
+            acceptablePrice: 0,
+            executionFee: 0,
+            callbackGasLimit: 0,
+            minOutputAmount: swap_min_amount
+        }),
+        orderType: OrderType.MarketSwap,
+        decreasePositionSwapType: DecreasePositionSwapType.NoSwap,
+        isLong: False,
+        shouldUnwrapNativeToken: False,
+        referralCode: empty(bytes32)
+    })
+    bal: uint256 = ERC20(WETH).balanceOf(self)
+    Router(GMX_ROUTER).createOrder(swap_params)
+    bal = ERC20(WETH).balanceOf(self) - bal
+    return bal
 
 @external
 @payable
-def withdraw(amount0: uint256, params: CreateOrderParams):
-    Router(GMX_ROUTER).sendWnt(ORDER_VAULT, msg.value, value=msg.value)
-    Router(GMX_ROUTER).createOrder(params)
-    assert ERC20(USDC).transfer(msg.sender, amount0, default_return_value=True), "Failed transfer"
-
-@internal
-def _paloma_check():
-    assert msg.sender == self.compass, "Not compass"
-    assert self.paloma == convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32), "Invalid paloma"
-
-@external
-def update_compass(new_compass: address):
-    self._paloma_check()
-    self.compass = new_compass
-    log UpdateCompass(msg.sender, new_compass)
-
-@external
-def update_blueprint(new_blueprint: address):
-    self._paloma_check()
-    old_blueprint: address = self.blueprint
-    self.blueprint = new_blueprint
-    log UpdateCompass(old_blueprint, new_blueprint)
-
-@external
-def set_paloma():
-    assert msg.sender == self.compass and self.paloma == empty(bytes32) and len(msg.data) == 36, "Invalid"
-    _paloma: bytes32 = convert(slice(msg.data, 4, 32), bytes32)
-    self.paloma = _paloma
-    log SetPaloma(_paloma)
-
-@external
-def update_refund_wallet(new_refund_wallet: address):
-    self._paloma_check()
-    old_refund_wallet: address = self.refund_wallet
-    self.refund_wallet = new_refund_wallet
-    log UpdateRefundWallet(old_refund_wallet, new_refund_wallet)
-
-@external
-def update_gas_fee(new_gas_fee: uint256):
-    self._paloma_check()
-    old_gas_fee: uint256 = self.gas_fee
-    self.gas_fee = new_gas_fee
-    log UpdateGasFee(old_gas_fee, new_gas_fee)
-
-@external
-def update_service_fee_collector(new_service_fee_collector: address):
-    self._paloma_check()
-    old_service_fee_collector: address = self.service_fee_collector
-    self.service_fee_collector = new_service_fee_collector
-    log UpdateServiceFeeCollector(old_service_fee_collector, new_service_fee_collector)
-
-@external
-def update_service_fee(new_service_fee: uint256):
-    self._paloma_check()
-    old_service_fee: uint256 = self.service_fee
-    self.service_fee = new_service_fee
-    log UpdateServiceFee(old_service_fee, new_service_fee)
+def withdraw(amount0: uint256, amount1: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    assert msg.sender == OWNER or msg.sender == FACTORY
+    Router(GMX_ROUTER).createOrder(order_params)
+    swap_params: CreateOrderParams = CreateOrderParams({
+        addresses: CreateOrderParamsAddresses({
+            receiver: OWNER,
+            callbackContract: empty(address),
+            uiFeeReceiver: empty(address),
+            market: empty(address),
+            initialCollateralToken: WETH,
+            swapPath: [GMX_MARKET]
+        }),
+        numbers: CreateOrderParamsNumbers({
+            sizeDeltaUsd: 0,
+            initialCollateralDeltaAmount: 0,
+            triggerPrice: 0,
+            acceptablePrice: 0,
+            executionFee: 0,
+            callbackGasLimit: 0,
+            minOutputAmount: swap_min_amount
+        }),
+        orderType: OrderType.MarketSwap,
+        decreasePositionSwapType: DecreasePositionSwapType.NoSwap,
+        isLong: False,
+        shouldUnwrapNativeToken: True,
+        referralCode: empty(bytes32)
+    })
+    assert ERC20(WETH).transfer(GMX_ROUTER, amount0, default_return_value=True), "Failed transfer"
+    bal: uint256 = ERC20(USDC).balanceOf(OWNER)
+    Router(GMX_ROUTER).createOrder(swap_params)
+    assert ERC20(USDC).transfer(OWNER, amount1, default_return_value=True), "Failed transfer"
+    bal = ERC20(USDC).balanceOf(OWNER) - bal
+    return bal
 
 @external
 @payable
