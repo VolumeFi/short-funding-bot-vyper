@@ -58,6 +58,11 @@ interface ERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
+interface Factory:
+    def deposited_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
+    def withdrawn_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
+    def canceled_event(): nonpayable
+
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10**18
 GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
@@ -86,7 +91,6 @@ def _check_sender(_addr0: address, _addr1: address):
     assert _addr0 == _addr1, "Unauthorized"
 
 @external
-@payable
 def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
     if msg.sender == OWNER:
         self._safe_transfer_from(USDC, OWNER, GMX_ROUTER, unsafe_div(amount0, 2))
@@ -121,6 +125,7 @@ def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: 
     bal: uint256 = ERC20(WETH).balanceOf(self)
     if msg.sender == OWNER:
         self._safe_transfer_from(USDC, msg.sender, GMX_ROUTER, unsafe_div(amount0, 2))
+        Factory(FACTORY).deposited_event(amount0, order_params)
     else:
         self._check_sender(msg.sender, FACTORY)
         self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
@@ -159,6 +164,7 @@ def _withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount
     bal: uint256 = ERC20(USDC).balanceOf(self)
     Router(GMX_ROUTER).createOrder(swap_params)
     bal = ERC20(USDC).balanceOf(self) - bal
+    Factory(FACTORY).withdrawn_event(amount0, order_params)
     return bal
 
 @external
@@ -167,16 +173,17 @@ def withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount:
     return self._withdraw(amount0, order_params, swap_min_amount)
 
 @external
-def withdraw_and_end_bot(amount0: uint256, amount1: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
     self._check_sender(msg.sender, OWNER)
     amount: uint256 = self._withdraw(amount0, order_params, swap_min_amount)
-    self._safe_transfer(USDC, OWNER, amount1)
+    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
     return amount
 
 @external
-def end_bot(amount: uint256):
+def end_bot():
     self._check_sender(msg.sender, OWNER)
-    self._safe_transfer(USDC, OWNER, amount)
+    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
+    Factory(FACTORY).canceled_event()
 
 @external
 @payable
