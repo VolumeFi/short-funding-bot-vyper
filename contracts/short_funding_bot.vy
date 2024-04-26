@@ -177,6 +177,7 @@ def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, swap
     self._check_sender(msg.sender, OWNER)
     amount: uint256 = self._withdraw(amount0, order_params, swap_min_amount)
     self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
+    Factory(FACTORY).canceled_event()
     return amount
 
 @external
