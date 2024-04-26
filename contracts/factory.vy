@@ -52,6 +52,19 @@ event BotDeployed:
     owner: address
     bot: address
 
+event Deposited:
+    bot: address
+    amount0: uint256
+    order_params: CreateOrderParams
+
+event Withdrawn:
+    bot: address
+    amount0: uint256
+    order_params: CreateOrderParams
+
+event Canceled:
+    bot: address
+
 event UpdateBlueprint:
     old_blueprint: address
     new_blueprint: address
@@ -65,7 +78,8 @@ event SetPaloma:
 
 
 interface Bot:
-    def withdraw(amount0: uint256, amount1: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:nonpayable
+    def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256: nonpayable
+    def withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256: nonpayable
 
 interface Router:
     def sendWnt(receiver: address, amount: uint256): payable
@@ -85,6 +99,7 @@ ORDER_VAULT: constant(address) = 0x31eF83a530Fde1B38EE9A18093A333D8Bbbc40D5
 USDC: constant(address) = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 WETH: constant(address) = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
 GMX_MARKET: constant(address) = 0x6853EA96FF216fAb11D2d930CE3C508556A4bdc4
+bot_to_owner: public(HashMap[address, address])
 blueprint: public(address)
 compass: public(address)
 paloma: public(bytes32)
@@ -99,17 +114,44 @@ def __init__(_blueprint: address, _compass: address):
 @external
 def deploy_bot():
     bot: address = create_from_blueprint(self.blueprint, msg.sender)
+    self.bot_to_owner[bot] = msg.sender
     log BotDeployed(msg.sender, bot)
-
-@external
-def withdraw(bot: address, amount0: uint256, amount1: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    self._paloma_check()
-    return Bot(bot).withdraw(amount0, amount1, order_params, swap_min_amount)
 
 @internal
 def _paloma_check():
     assert msg.sender == self.compass, "Not compass"
     assert self.paloma == convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32), "Invalid paloma"
+
+@external
+def deposit(bot: address, amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    self._paloma_check()
+    log Deposited(bot, amount0, order_params)
+    return Bot(bot).deposit(amount0, order_params, swap_min_amount)
+
+@internal
+def _bot_check():
+    assert self.bot_to_owner[msg.sender] != empty(address), "Unauthorized"
+
+@external
+def deposited_event(amount0: uint256, order_params: CreateOrderParams):
+    self._bot_check()
+    log Deposited(msg.sender, amount0, order_params)
+
+@external
+def withdraw(bot: address, amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    self._paloma_check()
+    log Withdrawn(bot, amount0, order_params)
+    return Bot(bot).withdraw(amount0, order_params, swap_min_amount)
+
+@external
+def withdrawn_event(amount0: uint256, order_params: CreateOrderParams):
+    self._bot_check()
+    log Withdrawn(msg.sender, amount0, order_params)
+
+@external
+def canceled_event():
+    self._bot_check()
+    log Canceled(msg.sender)
 
 @external
 def update_compass(new_compass: address):

@@ -58,6 +58,11 @@ interface ERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
+interface Factory:
+    def deposited_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
+    def withdrawn_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
+    def canceled_event(): nonpayable
+
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10**18
 GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
@@ -73,10 +78,25 @@ def __init__(owner: address):
     OWNER = owner
     FACTORY = msg.sender
 
+@internal
+def _safe_transfer(_token: address, _to: address, _value: uint256):
+    assert ERC20(_token).transfer(_to, _value, default_return_value=True), "Failed transfer"
+
+@internal
+def _safe_transfer_from(_token: address, _from: address, _to: address, _value: uint256):
+    assert ERC20(_token).transferFrom(_from, _to, _value, default_return_value=True), "Failed transferFrom"
+
+@internal
+def _check_sender(_addr0: address, _addr1: address):
+    assert _addr0 == _addr1, "Unauthorized"
+
 @external
-@payable
 def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    assert ERC20(USDC).transferFrom(msg.sender, GMX_ROUTER, amount0, default_return_value=True), "Failed transferFrom"
+    if msg.sender == OWNER:
+        self._safe_transfer_from(USDC, OWNER, GMX_ROUTER, unsafe_div(amount0, 2))
+    else:
+        self._check_sender(msg.sender, FACTORY)
+        self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
     Router(GMX_ROUTER).createOrder(order_params)
     swap_params: CreateOrderParams = CreateOrderParams({
         addresses: CreateOrderParamsAddresses({
@@ -103,18 +123,22 @@ def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: 
         referralCode: empty(bytes32)
     })
     bal: uint256 = ERC20(WETH).balanceOf(self)
+    if msg.sender == OWNER:
+        self._safe_transfer_from(USDC, msg.sender, GMX_ROUTER, unsafe_div(amount0, 2))
+        Factory(FACTORY).deposited_event(amount0, order_params)
+    else:
+        self._check_sender(msg.sender, FACTORY)
+        self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
     Router(GMX_ROUTER).createOrder(swap_params)
     bal = ERC20(WETH).balanceOf(self) - bal
     return bal
 
-@external
-@payable
-def withdraw(amount0: uint256, amount1: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    assert msg.sender == OWNER or msg.sender == FACTORY
+@internal
+def _withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
     Router(GMX_ROUTER).createOrder(order_params)
     swap_params: CreateOrderParams = CreateOrderParams({
         addresses: CreateOrderParamsAddresses({
-            receiver: OWNER,
+            receiver: self,
             callbackContract: empty(address),
             uiFeeReceiver: empty(address),
             market: empty(address),
@@ -136,12 +160,30 @@ def withdraw(amount0: uint256, amount1: uint256, order_params: CreateOrderParams
         shouldUnwrapNativeToken: True,
         referralCode: empty(bytes32)
     })
-    assert ERC20(WETH).transfer(GMX_ROUTER, amount0, default_return_value=True), "Failed transfer"
-    bal: uint256 = ERC20(USDC).balanceOf(OWNER)
+    self._safe_transfer(WETH, GMX_ROUTER, amount0)
+    bal: uint256 = ERC20(USDC).balanceOf(self)
     Router(GMX_ROUTER).createOrder(swap_params)
-    assert ERC20(USDC).transfer(OWNER, amount1, default_return_value=True), "Failed transfer"
-    bal = ERC20(USDC).balanceOf(OWNER) - bal
+    bal = ERC20(USDC).balanceOf(self) - bal
+    Factory(FACTORY).withdrawn_event(amount0, order_params)
     return bal
+
+@external
+def withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    self._check_sender(msg.sender, FACTORY)
+    return self._withdraw(amount0, order_params, swap_min_amount)
+
+@external
+def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
+    self._check_sender(msg.sender, OWNER)
+    amount: uint256 = self._withdraw(amount0, order_params, swap_min_amount)
+    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
+    return amount
+
+@external
+def end_bot():
+    self._check_sender(msg.sender, OWNER)
+    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
+    Factory(FACTORY).canceled_event()
 
 @external
 @payable
