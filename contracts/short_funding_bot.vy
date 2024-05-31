@@ -172,19 +172,54 @@ def withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount:
     self._check_sender(msg.sender, FACTORY)
     return self._withdraw(amount0, order_params, swap_min_amount)
 
-@external
-def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    self._check_sender(msg.sender, OWNER)
-    amount: uint256 = self._withdraw(amount0, order_params, swap_min_amount)
-    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
-    Factory(FACTORY).canceled_event()
-    return amount
+@internal
+def _swap_and_exit(markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
+    swap_params: CreateOrderParams = CreateOrderParams({
+        addresses: CreateOrderParamsAddresses({
+            receiver: OWNER,
+            callbackContract: empty(address),
+            uiFeeReceiver: empty(address),
+            market: empty(address),
+            initialCollateralToken: USDC,
+            swapPath: markets
+        }),
+        numbers: CreateOrderParamsNumbers({
+            sizeDeltaUsd: 0,
+            initialCollateralDeltaAmount: 0,
+            triggerPrice: 0,
+            acceptablePrice: 0,
+            executionFee: 0,
+            callbackGasLimit: 0,
+            minOutputAmount: _min_amount
+        }),
+        orderType: OrderType.MarketSwap,
+        decreasePositionSwapType: DecreasePositionSwapType.NoSwap,
+        isLong: False,
+        shouldUnwrapNativeToken: True,
+        referralCode: empty(bytes32)
+    })
+    amount0: uint256 = ERC20(USDC).balanceOf(self)
+    self._safe_transfer(USDC, GMX_ROUTER, amount0)
+    _bal: uint256 = ERC20(expected_token).balanceOf(OWNER)
+    Router(GMX_ROUTER).createOrder(swap_params)
+    _bal = ERC20(expected_token).balanceOf(OWNER) - _bal
+    assert _bal >= _min_amount, "High Slippage"
+    return _bal
 
 @external
-def end_bot():
+def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
     self._check_sender(msg.sender, OWNER)
-    self._safe_transfer(USDC, OWNER, ERC20(USDC).balanceOf(self))
+    self._withdraw(amount0, order_params, 0)
+    _bal: uint256 = self._swap_and_exit(markets, expected_token, _min_amount)
     Factory(FACTORY).canceled_event()
+    return _bal
+
+@external
+def end_bot(markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
+    self._check_sender(msg.sender, OWNER)
+    _bal: uint256 = self._swap_and_exit(markets, expected_token, _min_amount)
+    Factory(FACTORY).canceled_event()
+    return _bal
 
 @external
 @payable
