@@ -92,11 +92,8 @@ def _check_sender(_addr0: address, _addr1: address):
 
 @external
 def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    if msg.sender == OWNER:
-        self._safe_transfer_from(USDC, OWNER, GMX_ROUTER, unsafe_div(amount0, 2))
-    else:
-        self._check_sender(msg.sender, FACTORY)
-        self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
+    self._check_sender(msg.sender, FACTORY)
+    self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
     Router(GMX_ROUTER).createOrder(order_params)
     swap_params: CreateOrderParams = CreateOrderParams({
         addresses: CreateOrderParamsAddresses({
@@ -123,12 +120,7 @@ def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: 
         referralCode: empty(bytes32)
     })
     bal: uint256 = ERC20(WETH).balanceOf(self)
-    if msg.sender == OWNER:
-        self._safe_transfer_from(USDC, msg.sender, GMX_ROUTER, unsafe_div(amount0, 2))
-        Factory(FACTORY).deposited_event(amount0, order_params)
-    else:
-        self._check_sender(msg.sender, FACTORY)
-        self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
+    self._safe_transfer(USDC, GMX_ROUTER, unsafe_div(amount0, 2))
     Router(GMX_ROUTER).createOrder(swap_params)
     bal = ERC20(WETH).balanceOf(self) - bal
     return bal
