@@ -1,0 +1,1 @@
+# GMX Short Funding Bot

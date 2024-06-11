@@ -95,6 +95,8 @@ event UpdateServiceFee:
 interface Bot:
     def deposit(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256: nonpayable
     def withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256: nonpayable
+    def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256: nonpayable
+    def end_bot(markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256: nonpayable
 
 interface Router:
     def sendWnt(receiver: address, amount: uint256): payable
@@ -110,7 +112,6 @@ interface ERC20:
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10**18
 GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
-ORDER_VAULT: constant(address) = 0x31eF83a530Fde1B38EE9A18093A333D8Bbbc40D5
 USDC: constant(address) = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
 WETH: constant(address) = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
 GMX_MARKET: constant(address) = 0x6853EA96FF216fAb11D2d930CE3C508556A4bdc4
@@ -154,14 +155,15 @@ def deposit(user: address, amount0: uint256, order_params: CreateOrderParams, sw
     if user == msg.sender:
         assert user != self.compass
         if bot == empty(address):
-            bot = create_from_blueprint(self.blueprint, msg.sender)
+            bot = create_from_blueprint(self.blueprint, msg.sender, GMX_ROUTER, USDC, WETH, GMX_MARKET)
             self.bot_to_owner[bot] = msg.sender
             self.owner_to_bot[msg.sender] = bot
         self._safe_transfer_from(USDC, msg.sender, bot, amount0)
     else:
         self._paloma_check()
+    res: uint256 = Bot(bot).deposit(amount0, order_params, swap_min_amount)
     log Deposited(bot, amount0, order_params)
-    return Bot(bot).deposit(amount0, order_params, swap_min_amount)
+    return res
 
 @internal
 def _bot_check():
@@ -169,19 +171,26 @@ def _bot_check():
 
 @external
 def withdraw(bot: address, amount0: uint256, order_params: CreateOrderParams, swap_min_amount: uint256) -> uint256:
-    self._paloma_check()
+    if self.bot_to_owner[bot] != msg.sender:
+        self._paloma_check()
+    res: uint256 = Bot(bot).withdraw(amount0, order_params, swap_min_amount)
     log Withdrawn(bot, amount0, order_params)
-    return Bot(bot).withdraw(amount0, order_params, swap_min_amount)
+    return res
 
 @external
-def withdrawn_event(amount0: uint256, order_params: CreateOrderParams):
-    self._bot_check()
-    log Withdrawn(msg.sender, amount0, order_params)
-
-@external
-def canceled_event():
-    self._bot_check()
+def withdraw_and_end_bot(bot: address, amount0: uint256, order_params: CreateOrderParams, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
+    assert self.bot_to_owner[bot] == msg.sender, "Unauthorized"
+    res: uint256 = Bot(bot).withdraw_and_end_bot(amount0, order_params, markets, expected_token, _min_amount)
+    log Withdrawn(bot, amount0, order_params)
     log Canceled(msg.sender)
+    return res
+
+@external
+def end_bot(bot: address, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
+    assert self.bot_to_owner[bot] == msg.sender, "Unauthorized"
+    res: uint256 = Bot(bot).end_bot(markets, expected_token, _min_amount)
+    log Canceled(msg.sender)
+    return res
 
 @external
 def update_compass(new_compass: address):

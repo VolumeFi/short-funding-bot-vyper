@@ -58,25 +58,23 @@ interface ERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
-interface Factory:
-    def deposited_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
-    def withdrawn_event(amount0: uint256, order_params: CreateOrderParams): nonpayable
-    def canceled_event(): nonpayable
-
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10**18
-GMX_ROUTER: constant(address) = 0x7C68C7866A64FA2160F78EEaE12217FFbf871fa8
-ORDER_VAULT: constant(address) = 0x31eF83a530Fde1B38EE9A18093A333D8Bbbc40D5
-USDC: constant(address) = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831
-WETH: constant(address) = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
-GMX_MARKET: constant(address) = 0x6853EA96FF216fAb11D2d930CE3C508556A4bdc4
+GMX_ROUTER: immutable(address)
+USDC: immutable(address)
+WETH: immutable(address)
+GMX_MARKET: immutable(address)
 FACTORY: public(immutable(address))
 OWNER: public(immutable(address))
 
 @external
-def __init__(owner: address):
+def __init__(owner: address, _gmx_router: address, _usdc: address, _weth: address, _gmx_market: address):
     OWNER = owner
     FACTORY = msg.sender
+    GMX_ROUTER = _gmx_router
+    USDC = _usdc
+    WETH = _weth
+    GMX_MARKET = _gmx_market
 
 @internal
 def _safe_transfer(_token: address, _to: address, _value: uint256):
@@ -156,7 +154,6 @@ def _withdraw(amount0: uint256, order_params: CreateOrderParams, swap_min_amount
     bal: uint256 = ERC20(USDC).balanceOf(self)
     Router(GMX_ROUTER).createOrder(swap_params)
     bal = ERC20(USDC).balanceOf(self) - bal
-    Factory(FACTORY).withdrawn_event(amount0, order_params)
     return bal
 
 @external
@@ -200,17 +197,15 @@ def _swap_and_exit(markets: DynArray[address, MAX_SIZE], expected_token: address
 
 @external
 def withdraw_and_end_bot(amount0: uint256, order_params: CreateOrderParams, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
-    self._check_sender(msg.sender, OWNER)
+    self._check_sender(msg.sender, FACTORY)
     self._withdraw(amount0, order_params, 0)
     _bal: uint256 = self._swap_and_exit(markets, expected_token, _min_amount)
-    Factory(FACTORY).canceled_event()
     return _bal
 
 @external
 def end_bot(markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
-    self._check_sender(msg.sender, OWNER)
+    self._check_sender(msg.sender, FACTORY)
     _bal: uint256 = self._swap_and_exit(markets, expected_token, _min_amount)
-    Factory(FACTORY).canceled_event()
     return _bal
 
 @external
