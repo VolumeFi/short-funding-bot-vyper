@@ -62,7 +62,7 @@ event Withdrawn:
     amount0: uint256
     order_params: CreateOrderParams
 
-event Canceled:
+event Ended:
     bot: address
 
 event UpdateBlueprint:
@@ -182,14 +182,14 @@ def withdraw_and_end_bot(bot: address, amount0: uint256, order_params: CreateOrd
     assert self.bot_to_owner[bot] == msg.sender, "Unauthorized"
     res: uint256 = Bot(bot).withdraw_and_end_bot(amount0, order_params, markets, expected_token, _min_amount)
     log Withdrawn(bot, amount0, order_params)
-    log Canceled(msg.sender)
+    log Ended(msg.sender)
     return res
 
 @external
 def end_bot(bot: address, markets: DynArray[address, MAX_SIZE], expected_token: address, _min_amount: uint256) -> uint256:
     assert self.bot_to_owner[bot] == msg.sender, "Unauthorized"
     res: uint256 = Bot(bot).end_bot(markets, expected_token, _min_amount)
-    log Canceled(msg.sender)
+    log Ended(msg.sender)
     return res
 
 @external
